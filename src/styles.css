@@ -169,7 +169,8 @@ textarea#text:focus { border-color: rgba(242,201,76,0.5); }
      font once it's loaded, giving a near-fixed character pitch. */
   --cols: 32;
   width: calc(var(--cols) * 1ch + var(--sprocket-w) * 2 + 0.8rem);
-  max-width: 100%;
+  /* no max-width — preview pane scrolls horizontally so wider
+     receipts aren't clamped to the visible viewport. */
   --line-h: 1.4rem;
   --sprocket-w: 1.5rem;
   color: var(--paper-ink);
@@ -256,15 +257,19 @@ textarea#text:focus { border-color: rgba(242,201,76,0.5); }
    wraparound (tile -1 partially visible at top of line + tile 0 dot
    near bottom) draws a faint extra row at the very top of each
    visual line. */
-.receipt .line.strike,
-.receipt .line .strike {
-  text-decoration: none;
-  background-image: radial-gradient(circle, currentColor 25%, transparent 28%);
-  background-size: 0.36ch var(--line-h, 1.4rem);
+/* Strike background paints on the per-character `.ch` element, NOT
+   on its parent inline-span or `.line`. That way the strike reveals
+   in sync with each char's print (`.ch` is `visibility: hidden`
+   until `.printed`). Tile width is `1ch / 3` so the three dots per
+   char line up continuously across adjacent chars. The gradient
+   uses a fixed 1.5 px radius so the dot stays round instead of
+   stretching into a pill that would fill the tile. */
+.receipt .ch.strike {
+  background-image: radial-gradient(circle 1.5px at center,
+    currentColor 0, currentColor 65%, transparent 100%);
+  background-size: calc(1ch / 3) var(--line-h, 1.4rem);
   background-position: 0 -2px;
   background-repeat: repeat;
-  -webkit-box-decoration-break: clone;
-          box-decoration-break: clone;
 }
 .receipt .line.bold {
   /* a whole .center / .right / .left line can carry inline emphasis;

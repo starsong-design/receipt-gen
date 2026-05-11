@@ -1,146 +1,117 @@
-/* Printer sound: short ticks per character + paper-feed sweep per
-   line + low engine bed during print.
+/* Audio context + master bus + soft-clipped printer bus + persistent
+   DMP engine/motor. Ported from void-land. The printer.js module
+   schedules pin strikes, head-reverse thunks, and line-feed rollers
+   onto this bus.
 
-   All scheduling is anchored to the AudioContext's own clock
-   (ctx.currentTime). Callers pass `msFromT0` for per-char timing
-   relative to a print-start `t0` returned by beginPrint(); start /
-   stop of the engine bed are absolute (use ctx.currentTime). */
+   Engine/motor are constructed ONCE at init and run silently forever
+   (gain at 0). Each print just schedules gain ramps — no node
+   creation per-print means no startup clicks. */
 
-let ctx = null;
-let masterGain = null;
-let engine = null;          /* persistent low oscillator */
+import { createDMPEngine, createPrinterMotor } from './printer.js';
 
-function ensureCtx() {
-  if (ctx) return ctx;
-  const AC = window.AudioContext || window.webkitAudioContext;
-  if (!AC) return null;
-  ctx = new AC();
-  masterGain = ctx.createGain();
-  masterGain.gain.value = 0.55;
-  const limiter = ctx.createDynamicsCompressor();
-  limiter.threshold.value = -3;
-  limiter.knee.value = 6;
-  limiter.ratio.value = 2;
-  limiter.attack.value = 0.010;
-  limiter.release.value = 0.250;
-  masterGain.connect(limiter).connect(ctx.destination);
-  return ctx;
-}
-
-function startEngine() {
-  if (!ctx || engine) return;
-  const osc = ctx.createOscillator();
-  osc.type = 'sawtooth';
-  osc.frequency.value = 110;
-  const lp = ctx.createBiquadFilter();
-  lp.type = 'lowpass';
-  lp.frequency.value = 320;
-  lp.Q.value = 2;
-  const g = ctx.createGain();
-  g.gain.value = 0;
-  osc.connect(lp).connect(g).connect(masterGain);
-  osc.start();
-  engine = { g };
-}
-
-/* Ramp engine gain from its current scheduled value to `level` over
-   `dur` seconds, starting at `at`. cancelScheduledValues clears any
-   pending ramps so the new one always takes precedence. */
-function rampEngine(level, at, dur = 0.08) {
-  if (!engine) return;
-  const t = Math.max(at, ctx.currentTime);
-  engine.g.gain.cancelScheduledValues(t);
-  engine.g.gain.setValueAtTime(engine.g.gain.value, t);
-  engine.g.gain.linearRampToValueAtTime(level, t + dur);
-}
-
-function tick(time, pan = 0, bold = false) {
-  if (!ctx) return;
-  const dur = bold ? 0.022 : 0.014;
-  const buf = ctx.createBuffer(1, Math.ceil(dur * ctx.sampleRate), ctx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    const t = i / data.length;
-    data[i] = (Math.random() * 2 - 1) * Math.exp(-t * 12);
-  }
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  const bp = ctx.createBiquadFilter();
-  bp.type = 'bandpass';
-  bp.frequency.value = bold ? 1500 : 2200;
-  bp.Q.value = bold ? 6 : 4;
-  const g = ctx.createGain();
-  g.gain.value = bold ? 0.16 : 0.10;
-  const pn = ctx.createStereoPanner();
-  pn.pan.value = Math.max(-1, Math.min(1, pan));
-  src.connect(bp).connect(g).connect(pn).connect(masterGain);
-  src.start(time);
-}
-
-function feed(time) {
-  if (!ctx) return;
-  const dur = 0.12;
-  const buf = ctx.createBuffer(1, Math.ceil(dur * ctx.sampleRate), ctx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    const t = i / data.length;
-    data[i] = (Math.random() * 2 - 1) * Math.sin(t * Math.PI);
-  }
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  const lp = ctx.createBiquadFilter();
-  lp.type = 'lowpass';
-  lp.frequency.value = 700;
-  lp.Q.value = 1;
-  const g = ctx.createGain();
-  g.gain.value = 0.045;
-  src.connect(lp).connect(g).connect(masterGain);
-  src.start(time);
-}
-
-export function unlockAudio() {
-  ensureCtx();
-  if (ctx && ctx.state === 'suspended') ctx.resume();
-}
-
-export const audio = {
-  /* Called at the start of a print. Starts the engine bed (ramps up
-     from 0) and returns the `t0` reference time. char() and
-     lineStart() are scheduled relative to t0; endPrint() ramps the
-     engine back down and is anchored to the moment it's called. */
-  beginPrint() {
-    ensureCtx();
-    if (!ctx) return null;
-    if (ctx.state === 'suspended') ctx.resume();
-    startEngine();
-    const t0 = ctx.currentTime + 0.04;
-    feed(t0);
-    rampEngine(0.06, t0, 0.080);
-    return { t0 };
-  },
-  char(t0, msFromT0, pan, bold) {
-    if (!ctx) return;
-    tick(t0 + msFromT0 / 1000, pan, bold);
-  },
-  lineStart(t0, msFromT0) {
-    if (!ctx) return;
-    feed(t0 + msFromT0 / 1000);
-  },
-  /* Called when the per-char loop is finished. Ramps the engine
-     down to silence over 250 ms from now. No t0 / duration tracking
-     needed — we're always anchored to ctx.currentTime. */
-  endPrint() {
-    if (!ctx) return;
-    const now = ctx.currentTime;
-    feed(now + 0.02);
-    rampEngine(0, now + 0.05, 0.25);
-  },
-  /* Hard stop: cancels pending ramps and silences the engine
-     immediately. Use on print-abort. */
-  stopAll() {
-    if (!ctx || !engine) return;
-    const now = ctx.currentTime;
-    engine.g.gain.cancelScheduledValues(now);
-    engine.g.gain.setValueAtTime(0, now);
-  }
+export const state = {
+  audioCtx: null,
+  masterGain: null,
+  printerBus: null,
+  engine: null,
+  motor: null,
+  audioStarted: false,
+  enabled: false
 };
+
+function initAudio() {
+  if (state.audioCtx) return;
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  state.audioCtx = ctx;
+
+  state.masterGain = ctx.createGain();
+  state.masterGain.gain.value = 0.0;        /* ramped up by startRamps */
+
+  /* Master safety limiter — catches summed peaks at the end. */
+  const masterLimiter = ctx.createDynamicsCompressor();
+  masterLimiter.threshold.value = -3;
+  masterLimiter.knee.value = 6;
+  masterLimiter.ratio.value = 2;
+  masterLimiter.attack.value = 0.010;
+  masterLimiter.release.value = 0.40;
+  state.masterGain.connect(masterLimiter).connect(ctx.destination);
+
+  /* Printer bus with a tanh soft-clip BEFORE the master limiter.
+     WaveShaper has no internal envelope state so it can't pop when
+     signal first arrives — and it doesn't duck other channels. */
+  state.printerBus = ctx.createGain();
+  state.printerBus.gain.value = 0.55;
+  const softClip = ctx.createWaveShaper();
+  const N = 2048;
+  const curve = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const x = (i - N / 2) / (N / 2) * 2;       /* input range -2..+2 */
+    curve[i] = Math.tanh(x);                    /* asymptote at ±1 */
+  }
+  softClip.curve = curve;
+  softClip.oversample = '4x';
+  state.printerBus.connect(softClip).connect(state.masterGain);
+
+  /* Persistent engine + motor — silent at rest. */
+  state.engine = createDMPEngine(state.printerBus);
+  state.motor  = createPrinterMotor(state.printerBus);
+}
+
+function startRamps() {
+  const ctx = state.audioCtx;
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  const muteHold = 0.3;
+  state.masterGain.gain.cancelScheduledValues(t);
+  state.masterGain.gain.setValueAtTime(0, t);
+  state.masterGain.gain.setValueAtTime(0, t + muteHold);
+  state.masterGain.gain.linearRampToValueAtTime(1.0, t + muteHold + 0.08);
+}
+
+/* Called on every user gesture that might want to enable audio.
+   Initialises the context lazily and resumes if suspended. */
+export function ensureAudio() {
+  if (!state.audioCtx) initAudio();
+  const ctx = state.audioCtx;
+  if (!ctx) return;
+  if (ctx.state === 'suspended') {
+    ctx.resume().then(() => {
+      if (!state.audioStarted) { state.audioStarted = true; startRamps(); }
+    });
+  } else if (!state.audioStarted) {
+    state.audioStarted = true;
+    startRamps();
+  }
+}
+
+/* Alias kept for symmetry with the previous API. */
+export const unlockAudio = ensureAudio;
+
+/* The sound toggle in main.js gates whether scheduleX functions
+   actually fire. Mimics void-land's `humOn` flag. */
+export function setAudioEnabled(on) { state.enabled = on; }
+export function isAudioEnabled() { return state.enabled; }
+
+/* Hard stop — used on print abort. Cancels all pending engine/motor
+   ramps and silences them immediately. Already-scheduled char strikes
+   on the printer bus will still fire (Web Audio doesn't let us
+   unschedule individual node.start() calls), but the bed shuts up. */
+export function stopAllAudio() {
+  if (!state.audioCtx) return;
+  const ctx = state.audioCtx;
+  const now = ctx.currentTime;
+  const engine = state.engine;
+  const motor  = state.motor;
+  if (engine && engine.env) {
+    engine.env.gain.cancelScheduledValues(now);
+    engine.env.gain.setValueAtTime(0, now);
+  }
+  if (motor && motor.gain) {
+    motor.gain.gain.cancelScheduledValues(now);
+    motor.gain.gain.setValueAtTime(0, now);
+    if (motor.lfoG) {
+      motor.lfoG.gain.cancelScheduledValues(now);
+      motor.lfoG.gain.setValueAtTime(0, now);
+    }
+  }
+}
