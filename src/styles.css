@@ -214,12 +214,23 @@ textarea#text:focus { border-color: rgba(242,201,76,0.5); }
   margin: 0;
   line-height: var(--line-h);
 }
+/* Multi-column lines (any line containing one or more `\t`). Flex
+   space-between spreads the columns evenly: 2 cols become left/right,
+   3 cols become left/center/right, N cols spread across the width.
+   Each column right-aligns its last visible char so the rightmost
+   column hugs the right edge while the first hugs the left. */
 .receipt .line.row {
   display: flex;
   justify-content: space-between;
   gap: 0.6rem;
 }
-.receipt .line.row .col-r { text-align: right; }
+.receipt .line.row .col { text-align: left; }
+.receipt .line.row .col:last-child { text-align: right; }
+/* middle column(s) — 3+ cols means at least one middle column;
+   center it for the canonical left/center/right pattern. */
+.receipt .line.row .col:not(:first-child):not(:last-child) {
+  text-align: center;
+}
 .receipt .line.center { text-align: center; }
 .receipt .line.right  { text-align: right; }
 .receipt .line.left   { text-align: left; }

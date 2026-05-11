@@ -15,17 +15,21 @@
      bold                      bold the whole line
      strike                    strikethrough the whole line
      rule                      dotted rule (content ignored)
-     row LEFT\tRIGHT           two-column row (split on a literal \t)
+
+   Any line containing one or more `\t` (or real tab) is rendered as
+   a multi-column layout: 1 tab → 2 cols (left / right), 2 tabs →
+   3 cols (left / center / right), N tabs → N+1 cols, all spread
+   with flex `justify-content: space-between`. Style directives
+   still apply; alignment directives are ignored on multi-col lines.
 
    Lines that DON'T start with a `.directive` are rendered verbatim,
    including any leading whitespace — type spaces to indent.
-   Multiple consecutive spaces are preserved (each char becomes its
-   own non-breaking span at render time).
+   Multiple consecutive spaces are preserved.
 
    Blank lines render as empty rows (preserve vertical spacing). */
 
 const ALIGN = new Set(['center', 'left', 'right']);
-const SOLO  = new Set(['rule', 'row']);           /* consume rest of line */
+const SOLO  = new Set(['rule']);                  /* consume rest of line */
 const STYLE = new Set(['small', 'title', 'bold', 'strike']);
 const DIRECTIVES = new Set([...ALIGN, ...SOLO, ...STYLE]);
 
@@ -136,6 +140,7 @@ function parseDirectives(raw) {
 /* Returns an array of { classes, html, rule? } objects. */
 export function parseReceipt(text) {
   const out = [];
+  const TAB_RE = new RegExp(`[${ESC_TAB}\t]`);
   for (const raw of text.split('\n')) {
     const escaped = applyEscapes(raw);
     const { directives, content } = parseDirectives(escaped);
@@ -145,19 +150,19 @@ export function parseReceipt(text) {
       continue;
     }
 
-    if (directives.includes('row')) {
+    /* Multi-column: any `\t` (or real tab) in content triggers a flex
+       space-between layout. Style directives are kept; alignment
+       directives don't make sense here and are dropped. */
+    if (TAB_RE.test(content)) {
       const parts = splitRowColumns(content);
-      const left  = restoreEscapes(inlineMd(parts[0] || ''));
-      const right = restoreEscapes(inlineMd(parts.slice(1).join('\t').trim()));
+      const cols = parts.map(p => restoreEscapes(inlineMd(p)))
+                        .map(html => `<span class="col">${html || '&nbsp;'}</span>`)
+                        .join('');
       const classes = ['line', 'row'];
-      /* a row can still carry style directives like .small.row */
       for (const d of directives) {
         if (STYLE.has(d)) classes.push(d);
       }
-      out.push({
-        classes,
-        html: `<span class="col-l">${left}</span><span class="col-r">${right}</span>`
-      });
+      out.push({ classes, html: cols });
       continue;
     }
 
