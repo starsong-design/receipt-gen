@@ -22,15 +22,17 @@
       </header>
       <textarea id="text" spellcheck="false" placeholder="type here — markdown for emphasis, .center / .right at line start for alignment"></textarea>
       <div class="hint">
-        <p><strong>markdown:</strong> <code>**bold**</code>, <code>*italic*</code>, <code>~~strikethrough~~</code></p>
-        <p><strong>per-line directives</strong> (start of line, with the dot):</p>
+        <p><strong>markdown:</strong> <code>**bold**</code>, <code>*italic*</code>, <code>~~strikethrough~~</code>. Escape any sigil with <code>\</code> (e.g. <code>\*</code>, <code>\.</code>).</p>
+        <p><strong>per-line directives</strong> (start of line, with the dot — chain multiple, e.g. <code>.small.center foo</code>):</p>
         <ul>
           <li><code>.center</code> / <code>.right</code> / <code>.left</code> — alignment</li>
           <li><code>.title</code> — bigger, centered heading</li>
           <li><code>.small</code> — smaller text</li>
+          <li><code>.bold</code> / <code>.strike</code> — whole-line emphasis</li>
           <li><code>.rule</code> — dotted rule</li>
-          <li><code>.row TEXT&nbsp;&nbsp;PRICE</code> — two columns (≥2 spaces splits left/right)</li>
+          <li><code>.row LEFT\tRIGHT</code> — two columns (split on a literal <code>\t</code>)</li>
         </ul>
+        <p>Lines without a leading <code>.directive</code> render verbatim with leading spaces preserved — type spaces to indent.</p>
       </div>
     </section>
 

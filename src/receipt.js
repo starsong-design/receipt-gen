@@ -70,17 +70,15 @@ function wrapTextNodeChars(root) {
     }
     const cls = isStrike ? 'ch strike' : 'ch';
     const frag = document.createDocumentFragment();
+    /* Both regular space (U+0020) and non-breaking space (U+00A0) get
+       rendered as nbsp so multiple consecutive spaces in the source
+       survive CSS whitespace collapsing — required for indented lines
+       and `\t`-aligned columns. */
     for (const ch of text) {
-      if (ch === ' ' /* nbsp */) {
-        const span = document.createElement('span');
-        span.className = cls;
-        span.innerHTML = '&nbsp;';
-        frag.appendChild(span);
-        continue;
-      }
       const span = document.createElement('span');
       span.className = cls;
-      span.textContent = ch;
+      if (ch === ' ' || ch === ' ') span.innerHTML = '&nbsp;';
+      else                                span.textContent = ch;
       frag.appendChild(span);
     }
     node.replaceWith(frag);

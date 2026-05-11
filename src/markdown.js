@@ -1,7 +1,7 @@
 /* Minimal inline-markdown + per-line directives parser for receipts.
 
    Inline: **bold**, *italic*, ~~strikethrough~~.
-   Escape any sigil with a backslash: \*, \~, \\, \.
+   Escape any sigil with a backslash: \*, \~, \\, \., \t
 
    Line directives (start of line, with leading dot). Multiple may
    be chained, separated by whitespace OR by another dot:
@@ -13,8 +13,14 @@
      title                     bigger centered heading
      small                     smaller text
      bold                      bold the whole line
+     strike                    strikethrough the whole line
      rule                      dotted rule (content ignored)
-     row LEFT  RIGHT           two-column row (split on 2+ spaces)
+     row LEFT\tRIGHT           two-column row (split on a literal \t)
+
+   Lines that DON'T start with a `.directive` are rendered verbatim,
+   including any leading whitespace — type spaces to indent.
+   Multiple consecutive spaces are preserved (each char becomes its
+   own non-breaking span at render time).
 
    Blank lines render as empty rows (preserve vertical spacing). */
 
@@ -29,6 +35,7 @@ const ESC_BSLASH = '';
 const ESC_STAR   = '';
 const ESC_TILDE  = '';
 const ESC_DOT    = '';
+const ESC_TAB    = '';
 
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, ch => ({
@@ -42,12 +49,14 @@ function applyEscapes(s) {
     .replace(/\\\\/g, ESC_BSLASH)
     .replace(/\\\*/g, ESC_STAR)
     .replace(/\\~/g, ESC_TILDE)
-    .replace(/\\\./g, ESC_DOT);
+    .replace(/\\\./g, ESC_DOT)
+    .replace(/\\t/g, ESC_TAB);
 }
 
-/* Split a `.row` line on 2+ spaces, but don't break inside an inline
-   span like `**bold  text**` or `~~strike  through~~`. We mask those
-   spans with placeholder tokens, split on whitespace, and reinsert. */
+/* Split a `.row` line on a literal `\t` (or an actual tab char).
+   Inline spans like `**foo  bar**` or `~~strike  it~~` are masked
+   first so the user can put double spaces inside them — only the
+   tab character separates the columns now. */
 function splitRowColumns(content) {
   const masks = [];
   const masked = content
@@ -56,7 +65,7 @@ function splitRowColumns(content) {
       masks.push(m);
       return `\x00${idx}\x00`;
     });
-  return masked.split(/\s{2,}/).map(part =>
+  return masked.split(new RegExp(`[${ESC_TAB}\t]`)).map(part =>
     part.replace(/\x00(\d+)\x00/g, (_, i) => masks[Number(i)]));
 }
 
@@ -65,7 +74,10 @@ function restoreEscapes(s) {
     .replace(new RegExp(ESC_BSLASH, 'g'), '\\')
     .replace(new RegExp(ESC_STAR, 'g'), '*')
     .replace(new RegExp(ESC_TILDE, 'g'), '~')
-    .replace(new RegExp(ESC_DOT, 'g'), '.');
+    .replace(new RegExp(ESC_DOT, 'g'), '.')
+    /* In a non-row context `\t` doesn't have a separator meaning,
+       so render it as four non-breaking spaces — a visible indent. */
+    .replace(new RegExp(ESC_TAB, 'g'), '    ');
 }
 
 /* Inline pass — runs on already-escape-replaced text so sigils we
@@ -83,16 +95,24 @@ function inlineMd(text) {
    directive starts with `.`; chains may be separated by whitespace
    or by `.` directly (`.small.center foo`).
 
-   `\.center` (backslash before the leading dot) opts out of
-   directive parsing for that line — it renders as literal text
-   starting with `.center`. */
+   If the first non-whitespace char ISN'T `.`, the line isn't a
+   directive line at all — the raw content is preserved with leading
+   spaces intact (so a user can indent by typing spaces). Same for
+   `\.center` (escaped leading dot). */
 function parseDirectives(raw) {
-  if (raw.startsWith('\\.')) {
-    return { directives: [], content: raw.substring(1) };
+  if (raw.startsWith('\\.') || raw.startsWith(ESC_DOT)) {
+    /* The applyEscapes pass already turned `\.` into ESC_DOT; either
+       form means "this leading dot is literal". restoreEscapes later
+       turns it back into a `.`. */
+    return { directives: [], content: raw };
   }
+  let peek = 0;
+  while (peek < raw.length && raw[peek] === ' ') peek++;
+  if (peek >= raw.length || raw[peek] !== '.') {
+    return { directives: [], content: raw };
+  }
+  let i = peek;
   const directives = [];
-  let i = 0;
-  while (i < raw.length && raw[i] === ' ') i++;
   while (i < raw.length && raw[i] === '.') {
     let j = i + 1;
     while (j < raw.length && raw[j] >= 'a' && raw[j] <= 'z') j++;
@@ -100,11 +120,15 @@ function parseDirectives(raw) {
     if (!DIRECTIVES.has(name)) break;
     directives.push(name);
     i = j;
-    /* `row` and `rule` swallow the rest of the line as content */
     if (SOLO.has(name)) break;
     /* skip whitespace between directives, OR fall straight into
        another `.` for the no-space `.small.center` form */
     while (i < raw.length && raw[i] === ' ') i++;
+  }
+  /* No recognised directive — leave the line untouched (preserve
+     leading whitespace etc.). */
+  if (!directives.length) {
+    return { directives: [], content: raw };
   }
   return { directives, content: raw.substring(i) };
 }
@@ -124,7 +148,7 @@ export function parseReceipt(text) {
     if (directives.includes('row')) {
       const parts = splitRowColumns(content);
       const left  = restoreEscapes(inlineMd(parts[0] || ''));
-      const right = restoreEscapes(inlineMd(parts.slice(1).join('  ').trim()));
+      const right = restoreEscapes(inlineMd(parts.slice(1).join('\t').trim()));
       const classes = ['line', 'row'];
       /* a row can still carry style directives like .small.row */
       for (const d of directives) {
@@ -141,7 +165,6 @@ export function parseReceipt(text) {
     /* alignment: last alignment wins (so `.center .right` → right) */
     for (const d of directives) {
       if (ALIGN.has(d)) {
-        /* drop any prior alignment class */
         const idx = classes.findIndex(c => ALIGN.has(c));
         if (idx >= 0) classes.splice(idx, 1);
         classes.push(d);
