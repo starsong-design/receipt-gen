@@ -14,10 +14,10 @@ const dlBtn = $('download');
 
 const DEFAULT_TEXT = `.title VOID & CO.
 .rule
-.row RECEIPT\t#4F8K
-.row FILED\t${nowLocal()}
+.row RECEIPT\\t#4F8K
+.row FILED\\t${nowLocal()}
 .rule
-.row 1 x SCREAM\t∅
+.row 1 x SCREAM\\t∅
 .rule
 .center **REVIEW: DULY NOTED**
 .center the void *thanks you* for your contribution.
