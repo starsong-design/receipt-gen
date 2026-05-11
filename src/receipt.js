@@ -5,9 +5,11 @@ import { parseReceipt } from './markdown.js';
 
 export function buildReceipt(target, text) {
   const lines = parseReceipt(text);
-  /* Build line elements with per-char spans for the print animation. */
+  /* Build line elements with per-char spans for the print animation.
+     The caller controls .skip-anim — buildReceipt itself doesn't
+     touch it, so live-preview rebuilds don't flash through the
+     animated state. */
   target.innerHTML = '';
-  target.classList.remove('skip-anim');
   for (const line of lines) {
     const el = document.createElement('div');
     el.className = line.classes.join(' ');
@@ -105,16 +107,12 @@ export function printReceipt(target, opts = {}) {
     const lineCharMs = bold ? charMs * 2 : charMs;
     lineStarts.push({ t, line, ltr, bold, charMs: lineCharMs });
 
-    /* feed the paper first — line collapses open before chars appear */
+    /* line-start event drives audio paper-feed sounds; no visual
+       collapse — lines just exist at full height so wrapping works. */
     events.push({ kind: 'lineStart', t, line, ltr, bold });
-
-    if (!order.length) {
-      events.push({ kind: 'lineEnd', t, line });
-    } else {
-      for (const span of order) {
-        events.push({ kind: 'char', t, span, ltr, bold });
-        t += lineCharMs;
-      }
+    for (const span of order) {
+      events.push({ kind: 'char', t, span, ltr, bold });
+      t += lineCharMs;
     }
     if (li < lines.length - 1) t += linePauseMs;
   }
@@ -135,7 +133,6 @@ export function printReceipt(target, opts = {}) {
       while (i < events.length && events[i].t <= elapsed) {
         const ev = events[i++];
         if (ev.kind === 'lineStart') {
-          ev.line.classList.add('line-fed');
           if (onLineStart) onLineStart(ev);
         } else if (ev.kind === 'char') {
           ev.span.classList.add('printed');
@@ -212,7 +209,6 @@ export async function downloadReceiptAsPNG(el, filename = 'receipt.png') {
   const clone = el.cloneNode(true);
   clone.classList.add('skip-anim');
   for (const ch of clone.querySelectorAll('.ch')) ch.classList.add('printed');
-  for (const line of clone.querySelectorAll('.line')) line.classList.add('line-fed');
 
   const rect = el.getBoundingClientRect();
   const w = Math.ceil(rect.width);

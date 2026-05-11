@@ -1,10 +1,12 @@
 import { buildReceipt, printReceipt, downloadReceiptAsPNG } from './receipt.js';
 import { audio, unlockAudio, isAudioReady } from './audio.js';
+import { pushHash, readHash } from './url-state.js';
 
 const $ = (id) => document.getElementById(id);
 const text = $('text');
 const receipt = $('receipt');
 const soundCb = $('sound');
+const colsInput = $('cols');
 const printBtn = $('print');
 const dlBtn = $('download');
 
@@ -26,22 +28,56 @@ function nowLocal() {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-text.value = DEFAULT_TEXT;
+/* --- restore state from URL hash (if any) ------------------------ */
+
+{
+  const h = readHash();
+  if (h.text !== undefined) text.value = h.text;
+  else                      text.value = DEFAULT_TEXT;
+  if (h.cols)               colsInput.value = String(parseInt(h.cols, 10) || 32);
+  if (h.sound)              soundCb.checked = h.sound === '1';
+}
+
+function applyCols() {
+  const n = Math.max(12, Math.min(80, Number(colsInput.value) || 32));
+  receipt.style.setProperty('--cols', n);
+}
+applyCols();
 
 /* --- live preview (build without animation) ---------------------- */
 
 function previewNow() {
-  buildReceipt(receipt, text.value);
+  /* skip-anim set BEFORE building so new lines render full-height
+     with no transitions — keystroke rebuilds don't flash. */
   receipt.classList.add('skip-anim');
-  for (const ch of receipt.querySelectorAll('.ch')) ch.classList.add('printed');
-  for (const line of receipt.querySelectorAll('.line')) line.classList.add('line-fed');
+  buildReceipt(receipt, text.value);
+  syncHash();
 }
 previewNow();
+
+function syncHash() {
+  pushHash({
+    cols: Number(colsInput.value) || 32,
+    sound: soundCb.checked,
+    text: text.value
+  });
+}
 
 let liveTimer = 0;
 text.addEventListener('input', () => {
   clearTimeout(liveTimer);
   liveTimer = setTimeout(previewNow, 120);
+});
+
+colsInput.addEventListener('input', () => {
+  applyCols();
+  /* rebuild so .rule lines re-measure their dot count for the new width */
+  previewNow();
+});
+
+soundCb.addEventListener('change', () => {
+  if (soundCb.checked) unlockAudio();
+  syncHash();
 });
 
 /* --- print (with animation + optional audio) --------------------- */
@@ -52,23 +88,21 @@ async function runPrint() {
   if (printAbort) { printAbort.abort(); printAbort = null; }
   printAbort = new AbortController();
 
-  buildReceipt(receipt, text.value);
   /* the print animation expects max-height: 0 lines that open as
-     they're fed — skip-anim shows everything immediately, so remove
-     it for the print run. */
+     they're fed — remove skip-anim first so the lines start collapsed,
+     then build. */
   receipt.classList.remove('skip-anim');
-  for (const ch of receipt.querySelectorAll('.ch')) ch.classList.remove('printed');
-  for (const line of receipt.querySelectorAll('.line')) line.classList.remove('line-fed');
+  buildReceipt(receipt, text.value);
 
   const useSound = soundCb.checked;
   let audioSession = null;
 
   await printReceipt(receipt, {
     signal: printAbort.signal,
-    onPrintStart: ({ totalMs }) => {
+    onPrintStart: () => {
       if (!useSound) return;
       unlockAudio();
-      audioSession = audio.beginPrint(0.04, totalMs);
+      audioSession = audio.beginPrint();
     },
     onLineStart: ({ t }) => {
       if (!useSound || !audioSession) return;
@@ -76,9 +110,7 @@ async function runPrint() {
     },
     onChar: ({ t, span, ltr, bold }) => {
       if (!useSound || !audioSession) return;
-      /* Estimate pan from the char's x within the receipt for a
-         left-right head sweep effect. Use line direction as fallback
-         when bounding rect isn't yet measured. */
+      /* Pan from the char's x within the receipt (head sweep). */
       const rect = receipt.getBoundingClientRect();
       const cr = span.getBoundingClientRect();
       const cx = cr.left + cr.width / 2;
@@ -89,10 +121,9 @@ async function runPrint() {
       audio.char(audioSession.t0, t, pan, bold);
     },
     onPrintEnd: ({ aborted }) => {
-      if (!useSound || !audioSession || aborted) return;
-      /* total duration = last char time + small tail */
-      const lastChar = receipt.querySelector('.ch.printed:last-of-type');
-      audio.endPrint(audioSession.t0, /* totalSec */ performance.now() / 1000);
+      if (!useSound) return;
+      if (aborted) audio.stopAll();
+      else         audio.endPrint();
     }
   }).catch(err => {
     if (err.name !== 'AbortError') console.error(err);
@@ -109,9 +140,3 @@ dlBtn.addEventListener('click', async () => {
   await downloadReceiptAsPNG(receipt, 'receipt.png');
 });
 
-/* --- sound toggle unlocks AudioContext on user gesture so we can
-   schedule audio later without browser blocking it. ----------------- */
-
-soundCb.addEventListener('change', () => {
-  if (soundCb.checked) unlockAudio();
-});
