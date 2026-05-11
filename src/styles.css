@@ -213,6 +213,10 @@ textarea#text:focus { border-color: rgba(242,201,76,0.5); }
 .receipt .line {
   margin: 0;
   line-height: var(--line-h);
+  /* pre-wrap keeps consecutive source spaces (indents, padding inside
+     `\t`-aligned columns) while still allowing word wrap at spaces. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 /* Multi-column lines (any line containing one or more `\t`). Flex
    space-between spreads the columns evenly: 2 cols become left/right,

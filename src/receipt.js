@@ -70,15 +70,15 @@ function wrapTextNodeChars(root) {
     }
     const cls = isStrike ? 'ch strike' : 'ch';
     const frag = document.createDocumentFragment();
-    /* Both regular space (U+0020) and non-breaking space (U+00A0) get
-       rendered as nbsp so multiple consecutive spaces in the source
-       survive CSS whitespace collapsing — required for indented lines
-       and `\t`-aligned columns. */
+    /* Regular space (U+0020) stays as a real space so the line wraps
+       at word boundaries; `.line`'s `white-space: pre-wrap` preserves
+       consecutive spaces for indentation. Explicit non-breaking space
+       (U+00A0) stays non-breaking. */
     for (const ch of text) {
       const span = document.createElement('span');
       span.className = cls;
-      if (ch === ' ' || ch === ' ') span.innerHTML = '&nbsp;';
-      else                                span.textContent = ch;
+      if      (ch === ' ') span.innerHTML = '&nbsp;';
+      else                      span.textContent = ch;
       frag.appendChild(span);
     }
     node.replaceWith(frag);
