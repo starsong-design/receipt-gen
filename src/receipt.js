@@ -213,26 +213,31 @@ export function printReceipt(target, opts = {}) {
       lineStarts.push({ t, line, ltr, bold, charMs: lineCharMs, lineLen });
       events.push({ kind: 'lineStart', t, line, ltr, bold });
 
-      /* Within a row, each char advances by a fixed per-step time
-         regardless of pixel distance (chars are uniformly spaced
-         within a font — measuring per-pixel distance via getBCR was
-         destabilising because letter-spacing isn't reflected in the
-         span's width). Whitespace steps use the faster skip rate;
-         non-whitespace steps use the full print rate. Each event
-         carries its own step time so the audio layer can spread the
-         pin cluster across the letter's traversal. */
+      /* Within a row, each char step is the BASE time (print rate for
+         content, skip rate for whitespace) PLUS any extra pixel
+         distance beyond one chWidth at the skip rate. That covers
+         the empty space between multi-column `\t` segments and
+         centred / right-aligned margins — the head silently traverses
+         those gaps instead of teleporting. Each event carries the
+         base step time so the audio's pin cluster spreads across the
+         letter's own cell, not the gap. */
       const N = Math.max(1, lineLen - 1);
       let elapsed = 0;
+      let prevX = ordered.length ? ordered[0].x : startX;
       for (let ci = 0; ci < lineLen; ci++) {
-        const { span } = ordered[ci];
+        const { span, x } = ordered[ci];
         const isWhitespace = !span.textContent.trim();
-        const stepMs = isWhitespace ? skipMs : lineCharMs;
+        const baseMs = isWhitespace ? skipMs : lineCharMs;
+        const dx = Math.abs(x - prevX);
+        const extraMs = Math.max(0, dx - chWidth) / chWidth * skipMs;
+        const stepMs = (ci === 0 ? 0 : baseMs) + extraMs;
+        elapsed += stepMs;
         events.push({
           kind: 'char', t: t + elapsed, span, ltr, bold,
           linePos: ci / N,
-          stepMs
+          stepMs: baseMs
         });
-        elapsed += stepMs;
+        prevX = x;
       }
 
       /* advance t past the row sweep + update head */
