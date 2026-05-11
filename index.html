@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>receipt gen</title>
+<link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div class="layout">
+    <section class="editor">
+      <header>
+        <h1>receipt</h1>
+        <div class="ed-actions">
+          <label><input id="sound" type="checkbox" /> printer sounds</label>
+          <button id="print" type="button">print</button>
+          <button id="download" type="button">download PNG</button>
+        </div>
+      </header>
+      <textarea id="text" spellcheck="false" placeholder="type here — markdown for emphasis, .center / .right at line start for alignment"></textarea>
+      <div class="hint">
+        <p><strong>markdown:</strong> <code>**bold**</code>, <code>*italic*</code>, <code>~~strikethrough~~</code></p>
+        <p><strong>per-line directives</strong> (start of line, with the dot):</p>
+        <ul>
+          <li><code>.center</code> / <code>.right</code> / <code>.left</code> — alignment</li>
+          <li><code>.title</code> — bigger, centered heading</li>
+          <li><code>.small</code> — smaller text</li>
+          <li><code>.rule</code> — dotted rule</li>
+          <li><code>.row TEXT&nbsp;&nbsp;PRICE</code> — two columns (≥2 spaces splits left/right)</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="preview" id="preview">
+      <article class="receipt" id="receipt"></article>
+    </section>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
